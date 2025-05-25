@@ -127,40 +127,49 @@ int i2c_read_register(int fd, uint8_t addr, uint8_t reg, uint16_t *value) {
 }
 
 enum ALS_GAIN {
-    GAIN_X_1,
-    GAIN_X_2,
-    GAIN_X_1_8,
-    GAIN_X_1_4
+    GAIN_X_2, //01
+    GAIN_X_1, //00
+    GAIN_X_1_4, //11
+    GAIN_X_1_8, //10
 };
 
 enum ALS_INTEGRATION {
-    IT_25_MS,  //1100
-    IT_50_MS,  //1000
-    IT_100_MS, //0000
-    IT_200_MS, //0001
-    IT_400_MS, //0010
     IT_800_MS, //0011
+    IT_400_MS, //0010
+    IT_200_MS, //0001
+    IT_100_MS, //0000
+    IT_50_MS,  //1000
+    IT_25_MS,  //1100
 };
 
 float getResolution(uint16_t config) {
-    float gain = 1.0f;
+    static float resolution_table[6][4]={
+        {0.0042f,0.0084f,0.0336f,0.0672f},
+        {0.0084f,0.0168f,0.0672f,0.1344f},
+        {0.0168f,0.0336f,0.1344f,0.2688f},
+        {0.0336f,0.0672f,0.2688f,0.5376f},
+        {0.0672f,0.1344f,0.5376f,1.0752f},
+        {0.1344f,0.2688f,1.0752f,2.1504f},
+    };
+
+    ALS_GAIN gain = GAIN_X_1;
     switch ((config >> 11) & 0x03) {
-        case 0x00: gain = 1.0f; break;
-        case 0x01: gain = 2.0f; break;
-        case 0x02: gain = 1.0f/8.0f; break;
-        case 0x03: gain = 1.0f/4.0f; break;
+        case 0x00: gain = GAIN_X_1;break;
+        case 0x01: gain = GAIN_X_2;break;
+        case 0x02: gain = GAIN_X_1_8;break;
+        case 0x03: gain = GAIN_X_1_4;break;
     }
-    float integration_time = 100.0f;
+
+    ALS_INTEGRATION itms = IT_100_MS;
     switch ((config >> 6) & 0x0F) {
-        case 0x0C: integration_time = 25.0f; break;
-        case 0x08: integration_time = 50.0f; break;
-        case 0x00: integration_time = 100.0f; break;
-        case 0x01: integration_time = 200.0f; break;
-        case 0x02: integration_time = 400.0f; break;
-        case 0x03: integration_time = 800.0f; break;
+        case 0x0C: itms = IT_25_MS; break;
+        case 0x08: itms = IT_50_MS; break;
+        case 0x00: itms = IT_100_MS; break;
+        case 0x01: itms = IT_200_MS; break;
+        case 0x02: itms = IT_400_MS; break;
+        case 0x03: itms = IT_800_MS; break;
     }
-    LOGV("gain: %f  it:%f",gain,integration_time);
-    return 0.0036f * (integration_time / 100.0f) * (1.0f / gain);
+    return resolution_table[itms][gain];
 }
 
 class Veml7700 {
@@ -190,7 +199,6 @@ public:
     };
     bool powerOn(){
         uint16_t config = 0;
-        LOGD("read config %02x",config);
         setBit0(config,0);
         setBit0(config,1); //disable interrupt
         setBit0(config,2); //reserved
@@ -200,8 +208,7 @@ public:
             LOGE("i2c write config failed");
             return false;
         }
-        LOGV("wirted config %02x",config);
-        mConfig = config;
+        LOGI("wirted config %02x",config);
         return true;
     }
     bool shutdown(){
@@ -213,7 +220,6 @@ public:
             return false;
         }
         LOGV("wirted config %02x",config);
-        mConfig = config;
         return true;
     }
 
@@ -225,24 +231,24 @@ public:
         }
         switch(gain){
             case GAIN_X_1:
-                setBit0(config,12);
-                setBit0(config,11);
+                setBit(config,12,0);
+                setBit(config,11,0);
                 break;
             case GAIN_X_2:
-                setBit0(config,12);
-                setBit1(config,11);
+                setBit(config,12,0);
+                setBit(config,11,1);
                 break;
             case GAIN_X_1_4:
-                setBit1(config,12);
-                setBit0(config,11);
+                setBit(config,12,1);
+                setBit(config,11,1);
                 break;
             case GAIN_X_1_8:
-                setBit1(config,12);
-                setBit1(config,11);
+                setBit(config,12,1);
+                setBit(config,11,0);
                 break;
             default:
-                setBit0(config,12);
-                setBit0(config,11);
+                setBit(config,12,0);
+                setBit(config,11,0);
                 break;
         }
         LOGV("wirte config %02x",config);
@@ -251,7 +257,6 @@ public:
             return false;
         }
         LOGV("wirted config %02x",config);
-        mConfig = config;
         return true;
     }
     bool setIntegration(ALS_INTEGRATION it){
@@ -261,13 +266,13 @@ public:
             return false;
         }
         switch(it){
-            IT_25_MS:  //1100
+            case IT_25_MS:  //1100
                 setBit(config,9,1);
                 setBit(config,8,1);
                 setBit(config,7,0);
                 setBit(config,6,0);
                 break;
-            IT_50_MS:  //1000
+            case IT_50_MS:  //1000
                 setBit(config,9,1);
                 setBit(config,8,0);
                 setBit(config,7,0);
@@ -279,19 +284,19 @@ public:
                 setBit(config,7,0);
                 setBit(config,6,0);
                 break;
-            IT_200_MS: //0001
+            case IT_200_MS: //0001
                 setBit(config,9,0);
                 setBit(config,8,0);
                 setBit(config,7,0);
                 setBit(config,6,1);
                 break;
-            IT_400_MS: //0010
+            case IT_400_MS: //0010
                 setBit(config,9,0);
                 setBit(config,8,0);
                 setBit(config,7,1);
                 setBit(config,6,0);
                 break;
-            IT_800_MS: //0011
+            case IT_800_MS: //0011
                 setBit(config,9,0);
                 setBit(config,8,0);
                 setBit(config,7,1);
@@ -310,7 +315,6 @@ public:
             return false;
         }
         LOGV("wirted config %02x",config);
-        mConfig = config;
         return true;
     }
 
@@ -347,6 +351,8 @@ int Veml7700Test() {
         LOGE("power on failed");
         return -1;
     }
+    veml7700.setGain(GAIN_X_1_8);
+    veml7700.setIntegration(IT_25_MS);
     while (keepRunning) {
         float lux = 0 ;
         if(veml7700.getLux(lux)){
